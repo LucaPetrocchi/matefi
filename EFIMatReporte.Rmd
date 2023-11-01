@@ -1,0 +1,225 @@
+---
+title: "EFI Matemática"
+author: "Luca Petrocchi"
+date: "2023-10-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Regresión Lineal de Recaudaciones Impuestarias Totales de E.E.U.U.
+
+Este estudio está realizado con datos obtenidos del Banco de la Reserva Federal de St. Louis (https://fred.stlouisfed.org/)
+
+# 0: Importación de datos y librerías
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+db = read.csv('.\\QTAXTOTALQTAXCAT1USNO.csv')
+```
+
+# 1: Formateando datos & omitiendo nulos para facilitar uso
+
+```{r}
+colnames(db) = c('Fecha', 'Impuestos')
+db = transform(db, Impuestos = as.numeric(Impuestos))
+db = transform(db, Fecha = as.Date(Fecha))
+db = na.omit(db)
+Fecha = db$Fecha
+Impuestos = db$Impuestos
+```
+
+# 2: Estudio principal de datos
+
+Para asistir en el análisis, se comenzará por la creación de un gráfico de los datos.
+
+```{r}
+ggplot(as.data.frame(Fecha), aes(x = Fecha)) + 
+  geom_line(aes(y = Impuestos, color = "Recaudaciones (1M USD)")) + 
+  scale_y_continuous(
+    labels = scales::comma,
+    limits = c(100000, 700000), 
+    breaks = seq(100000, 1000000, 100000), 
+    expand = c(0, 0)
+    ) +
+  labs(x = "Anio",
+       y = "Valor",
+       color = "Leyenda")
+```
+
+Podemos observar una aparente relación entre el tiempo y el total de recaudaciones. El cálculo de la Correlación de Pearson apoya esta observación con un resultado excepcional;
+
+```{r}
+cor(Impuestos, as.numeric(Fecha))
+```
+# 3: Generación de modelo
+
+```{r}
+modelo = lm(Impuestos ~ as.numeric(Fecha))
+summary(modelo)
+```
+El resumen de R nos ofrece resultados muy prometedores; el valor p es extraordinariamente cercano a 0 (menor a 0.00000000000000022), sugiriendo que el nivel de determinación de la fecha respecto a la recaudación de impuestos es muy alto. 
+
+Por otra parte, el valor R^2 es cercano a 1, indicando que el modelo de regresión se aproxima mucho a los datos reales. Cabe destacar que en el ámbito económico un valor R^2 superior a 0.3 es raro; un valor de 0.8 es excepcional.
+
+# 4: Validación de modelo
+
+Para asegurarnos de su validez, podemos utilizar el modelo para "predecir" los valores del rango de datos que ya conocemos y superponer los resultados al gráfico anterior.
+
+```{r}
+p = predict(modelo, as.data.frame(Fecha))
+
+ggplot(as.data.frame(Fecha), aes(x = Fecha)) + 
+  geom_line(aes(y = Impuestos, color = "Impuestos (1M USD)")) + 
+  geom_line(aes(y = p, color = "Predicción")) +
+  scale_y_continuous(
+    labels = scales::comma,
+    limits = c(100000, 700000), 
+    breaks = seq(100000, 1000000, 100000), 
+    expand = c(0, 0)
+  ) +
+  labs(x = "Anio",
+       y = "Valor",
+       color = "Leyenda")
+```
+
+Este gráfico nos esclarece la verdadera validez del modelo; aunque la línea de predicciones se aproxima mucho a los valores reales, podemos observar que en tiempos recientes los valores reales (y por ende, el margen de error) incrementan mucho en volatilidad.
+
+# 5: Generación y contraste de modelo alternativo
+
+Podemos repetir este proceso con los datos ajustados estacionalmente para clarificar este fenómeno.
+
+```{r}
+dbAjuste = read.csv('.\\QTAXTOTALQTAXCAT1USYES.csv')
+colnames(dbAjuste) = c('Fecha', 'Impuestos')
+dbAjuste = transform(dbAjuste, Impuestos = as.numeric(Impuestos))
+dbAjuste = transform(dbAjuste, Fecha = as.Date(Fecha))
+dbAjuste = na.omit(dbAjuste)
+FechaAjuste = dbAjuste$Fecha
+ImpuestosAjuste = dbAjuste$Impuestos
+
+modeloAjuste = lm(ImpuestosAjuste ~ FechaAjuste, data = dbAjuste)
+summary(modeloAjuste)
+
+pAjuste = predict(modeloAjuste, as.data.frame(FechaAjuste))
+
+ggplot(as.data.frame(FechaAjuste), aes(x = FechaAjuste)) + 
+  geom_line(aes(y = ImpuestosAjuste, color = "Impuestos Ajustados (1M USD)")) + 
+  geom_line(aes(y = pAjuste, color = "Predicción Ajustada")) +
+  scale_y_continuous(
+    labels = scales::comma,
+    limits = c(100000, 700000), 
+    breaks = seq(100000, 1000000, 100000), 
+    expand = c(0, 0)
+  ) +
+  labs(x = "Anio",
+       y = "Valor",
+       color = "Leyenda")
+```
+
+En la figura anterior, no obstante, puede observarse que existe una cierta tendencia linear en el incremento posterior al año 2020. Con la esperanza de mejorar la adherencia a tendencias actuales, se entrenará otro modelo excluyendo los datos anteriores a 2023.
+
+```{r}
+segmentoImpuestos = db[c(85:126), 2]
+segmentoFechas = db[c(85:126), 1]
+modeloSesgado = lm(segmentoImpuestos ~ as.numeric(segmentoFechas))
+summary(modeloSesgado)
+```
+Podemos observar en el decremento de R^2 (0.8 -> 0.6) que este nuevo modelo es marcadamente menos preciso que el original a pesar de utilizar una metodología idéntica; este cambio refuerza la impresión de volatilidad antedicha. El incremento del valor p, aunque notable, es insignificante (0.00000000000000022 -> 0.000000000321, donde una diferencia significativa es al menos 0.05).
+
+Al graficar, superpondremos los resultados del modelo sesgado con aquellos del original para clarificar sus diferencias.
+
+
+```{r}
+pSesgada = predict(modeloSesgado, segmentoFechas)
+
+ggplot(as.data.frame(segmentoFechas), aes(x = segmentoFechas)) + 
+  geom_line(aes(y = segmentoImpuestos, color = "Impuestos (1M USD)")) + 
+  geom_line(aes(y = p[85:126], color = "Modelo Original")) +
+  geom_line(aes(y = pSesgada, color = "Modelo Sesgado")) +
+  scale_y_continuous(
+    labels = scales::comma,
+    limits = c(100000, 700000), 
+    breaks = seq(100000, 1000000, 100000), 
+    expand = c(0, 0)
+  ) +
+  labs(x = "Anio",
+       y = "Valor",
+       color = "Leyenda")
+```
+El modelo sesgado aparenta un mucho mejor ajuste, sugiriendo un cambio drástico de tendencias en tiempos recientes.
+
+Podemos también repetir el proceso con el los datos ajustados estacionalmente para asegurarnos de ello.
+
+```{r}
+iAjuste = dbAjuste[c(17:58), 2]
+fAjuste = as.numeric(dbAjuste[c(17:58), 1])
+ajuste = data.frame(ImpuestosAjuste=unlist(iAjuste), FechasAjuste=fAjuste)
+
+modeloSesgadoAjustado = lm(ImpuestosAjuste ~ FechasAjuste, data=ajuste)
+summary(modeloSesgadoAjustado)
+```
+Notablemente, el uso de datos ajustados estacionalmente incrementa el valor de R^2 (0.8 -> 0.6 -> 0.88), mejorando marcadamente el ajuste, así como decrementando el valor p (0.00000000000000022 -> 0.000000000321 -> 0.00000000000000022), aunque una vez más se trata de un cambio insignificante.
+
+Se graficarán las predicciones de este nuevo modelo junto al modelo sesgado original para ilustrar sus diferencias.
+
+```{r}
+pAjusteSesgada = predict(
+  modeloSesgadoAjustado,
+  newdata=(FechasAjuste=ajuste)
+  )
+
+segmentoFechasAjuste = ajuste$FechasAjuste
+
+ggplot(as.data.frame(segmentoFechasAjuste), aes(x = segmentoFechasAjuste)) + 
+  geom_line(aes(y = ImpuestosAjuste[17:58], color = "Impuestos Ajustados (1M USD)")) + 
+  geom_line(aes(y = pAjuste[17:58], color = "Predicción Ajustada")) +
+  geom_line(aes(y = pAjusteSesgada, color = "Predicción Sesgada Ajustada")) +
+  scale_y_continuous(
+    labels = scales::comma,
+    limits = c(100000, 700000), 
+    breaks = seq(100000, 1000000, 100000), 
+    expand = c(0, 0)
+  ) +
+  labs(x = "Anio",
+       y = "Valor",
+       color = "Leyenda")
+
+```
+
+Se descubre con este nuevo gráfico que el ajuste estacional reduce marcadamente la apariencia de volatilidad sugerida por el contraste entre los modelos original y sesgado aplicados a los datos no ajustados. Es notable que ambos casos el margen de error es mucho menor como consecuencia de la eliminación de los efectos estacionales.
+
+No obstante, la volatilidad observada, aunque reducida, permanece presente; la caída en el 2020 temprano y el pico correspondiente con 2022 ambos representan errores de 50,000M USD.
+
+# 6: Predicciones
+
+Para generar nuestras predicciones finales, se aplicará el modelo ajustado  a un período que durará desde el presente hasta el último cuarto de 2027. Se optará por este en cambio de los modelos no ajustados debido a su fiabilidad superior resultando de la menor volatilidad de los datos, y se descartará el modelo sesgado ajustado debido a su diferencia insignificante.
+
+```{r}
+FechaPrediccion = seq(
+      as.Date(max(fAjuste)),
+      by="3 month",
+      length = 42,
+      )
+
+ajusteFinal = predict(modeloAjuste, newdata = (FechaAjuste = FechaPrediccion))
+ajusteFinal
+ggplot(as.data.frame(FechaPrediccion), aes(x = as.Date(FechaPrediccion))) + 
+  geom_line(aes(y = ajusteFinal, color = "Predicción Ajustada")) +
+  scale_y_continuous(
+    labels = scales::comma,
+    limits = c(400000, 700000), 
+    breaks = seq(100000, 1000000, 100000), 
+    expand = c(0, 0)
+  ) +
+  labs(x = "Anio",
+       y = "Valor",
+       color = "Leyenda")
+
+```
+
+ 
